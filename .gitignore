@@ -1,0 +1,10 @@
+.env
+*.log
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env.*
+logs/
+data/
+playwright/.cache/

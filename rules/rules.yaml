@@ -1,0 +1,143 @@
+version: 1
+score_threshold: 18
+explain_top_n: 6
+
+source_confidence:
+  FULLTEXT_HTTP: 1.00
+  FULLTEXT_BROWSER: 0.95
+  RSS_ONLY: 0.70
+
+weights:
+  category:
+    important_notice: 14
+    promotion: 10
+    resource_share: 9
+    tutorial: 9
+    benchmark: 9
+    well_supported_opinion: 7
+  signals:
+    has_price_or_discount: 8
+    has_time_limit: 6
+    has_steps_or_checklist: 6
+    has_data_or_numbers: 5
+    has_comparison: 6
+    has_risk_warning: 10
+    has_update_changelog: 8
+    has_actionable_conclusion: 7
+  bonuses:
+    long_content: 3
+  penalties:
+    too_short: -8
+    rss_only_penalty: -4
+    emotional_or_quarrel: -10
+    clickbait: -8
+    repeated_or_repost_hint: -6
+    pure_help_no_context: -7
+
+keywords:
+  whitelist:
+    - 羊毛
+    - 优惠
+  blacklist:
+    - 出
+  topics:
+    important_notice:
+      - 公告
+      - 规则
+      - 变更
+      - 故障
+      - 异常
+      - 宕机
+      - 安全
+      - 漏洞
+      - 风险
+      - 重大更新
+      - 服务异常
+    promotion:
+      - 优惠
+      - 折扣
+      - 限时
+      - 促销
+      - 活动
+      - 返现
+      - 优惠码
+    resource_share:
+      - 工具
+      - 脚本
+      - 项目
+      - 仓库
+      - 镜像
+      - 下载
+      - release
+      - github
+      - docker
+    tutorial:
+      - 教程
+      - 攻略
+      - 步骤
+      - 复盘
+      - 踩坑
+      - 指南
+      - 经验
+    benchmark:
+      - 实测
+      - 对比
+      - benchmark
+      - 性能
+      - 成本
+      - 数据
+      - 价格
+      - 延迟
+      - 带宽
+      - 流量
+    well_supported_opinion:
+      - 结论
+      - 建议
+      - 推荐
+      - 观点
+      - 分析
+  trash:
+    - 闲聊
+    - 水
+    - 顶
+    - 求助
+    - 帮忙
+    - 急
+    - 在线等
+
+signals:
+  has_price_or_discount:
+    any_regex:
+      - "(¥|￥|元|刀|USD|US\\$)\\s*\\d+"
+      - "\\b\\d{1,3}%\\b"
+      - "(折扣|优惠码|券|返现|降价)"
+  has_time_limit:
+    any_regex:
+      - "(限时|截止|仅限今天|今晚|\\b24\\s*小时\\b|\\b48\\s*小时\\b)"
+  has_steps_or_checklist:
+    any_regex:
+      - "(步骤|第\\d+步|\\n\\s*1\\.|\\n\\s*2\\.|\\n\\s*3\\.|\\n-\\s)"
+  has_data_or_numbers:
+    any_regex:
+      - "\\b\\d+(\\.\\d+)?\\s*(ms|s|GB|MB|TB|Mbps|Gbit|W|°C)\\b"
+      - "(QPS|TPS|延迟|吞吐|带宽|IOPS|benchmark)"
+  has_comparison:
+    any_regex:
+      - "(对比|相比|vs\\.|VS|优于|不如|更快|更省)"
+  has_risk_warning:
+    any_regex:
+      - "(风险|踩坑|注意|避坑|坑点|不要|警告|漏洞|CVE)"
+  has_update_changelog:
+    any_regex:
+      - "(更新|changelog|release note|版本|v\\d+\\.)"
+  has_actionable_conclusion:
+    any_regex:
+      - "(结论|建议|可行方案|最终|推荐|总结)"
+
+length_rules:
+  min_effective_chars: 180
+  very_short_chars: 80
+  long_chars_bonus_threshold: 1200
+
+controls:
+  max_rules_applied: 50

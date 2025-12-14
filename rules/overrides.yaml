@@ -1,0 +1,14 @@
+# This file is managed by bot commands (whitelist/blacklist/threshold).
+# It is merged on top of rules/rules.yaml.
+
+version: 1
+
+# Override threshold (optional)
+score_threshold: null
+
+keywords:
+  whitelist: []
+  blacklist: []
+
+# Title-level blocks (optional)
+block_title_regex: []

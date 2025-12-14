@@ -1,0 +1,26 @@
+[Unit]
+Description=Nodeseek RSS Aggregator Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/nodeseek-bot
+EnvironmentFile=/etc/nodeseek-bot.env
+ExecStart=/opt/nodeseek-bot/.venv/bin/python -m nodeseek_bot
+Restart=always
+RestartSec=5
+User=nodeseekbot
+Group=nodeseekbot
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/nodeseek-bot/data /opt/nodeseek-bot/logs /opt/nodeseek-bot/rules
+
+# Hardening (optional)
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target
