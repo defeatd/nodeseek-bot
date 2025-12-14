@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  nodeseek-bot:
+    build:
+      context: .
+    image: nodeseek-bot:alpine
+    restart: unless-stopped
+
+    # 推荐：用 env_file 管理配置；不要提交真实 .env
+    env_file:
+      - .env
+
+    # 如需改为自定义文件：
+    # env_file:
+    #   - /path/to/nodeseek-bot.env
+
+    environment:
+      # 容器默认对外暴露 metrics
+      METRICS_BIND: "0.0.0.0"
+      # Alpine 镜像不包含 Playwright
+      ALLOW_BROWSER_FALLBACK: "false"
+
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./rules:/app/rules
+
+    ports:
+      - "9108:9108"

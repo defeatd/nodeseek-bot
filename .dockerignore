@@ -1,0 +1,15 @@
+.git
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.env.*
+logs/
+data/
+playwright/.cache/
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store

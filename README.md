@@ -2,6 +2,36 @@
 
 面向 Debian 12 的 Nodeseek 新帖聚合 Telegram Bot：RSS 轮询 →（可选）抓全文 → AI 总结 → 规则评分 → 频道推送 + 私聊命令管理。
 
+## Docker 部署（Alpine，本地构建镜像）
+> 适合不想手装 Python/venv 的场景。该镜像基于 Alpine，**不包含 Playwright**（因此不会有浏览器兜底抓全文）。
+
+1) 准备配置文件
+```bash
+cp .env.example .env
+# 编辑 .env，至少填写 BOT_TOKEN / TARGET_CHAT_ID / ADMIN_USER_ID / AI_BASE_URL / AI_API_KEY / AI_MODEL
+```
+
+2) 构建并启动
+```bash
+docker compose up -d --build
+```
+
+3) 查看日志
+```bash
+docker compose logs -f
+```
+
+4) 指标/状态
+- Prometheus 指标：`http://127.0.0.1:9108/metrics`
+- 状态文件：容器内 `/app/data/status.json`（compose 默认已把 `./data` 挂载到该目录）
+
+5) 重要说明
+- Alpine 镜像 **不包含 Playwright**，因此 `ALLOW_BROWSER_FALLBACK` 在 compose 里默认设置为 `false`。
+- 如需让 metrics 端口对外可访问：保持 `METRICS_BIND=0.0.0.0`（Dockerfile/compose 已默认设置）。
+- 建议持久化目录：`./data`（sqlite + status）、`./logs`（日志）、`./rules`（规则与 overrides）。
+
+---
+
 ## Debian 12 部署前置
 你需要提前准备：
 - 一台 Debian 12 VPS
