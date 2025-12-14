@@ -21,6 +21,13 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
+4) 因为权限问题会报错，需要修复
+```bash
+# 确保你在 docker-compose.yml 所在的目录
+docker compose down
+chmod -R 777 data logs rules
+docker compose up -d
+```
 4) 指标/状态
 - Prometheus 指标：`http://127.0.0.1:9108/metrics`
 - 状态文件：容器内 `/app/data/status.json`（compose 默认已把 `./data` 挂载到该目录）
