@@ -17,6 +17,7 @@ from nodeseek_bot.storage.types import (
     ScoreResult,
     SummaryResult,
 )
+
 from nodeseek_bot.utils import canonicalize_url, now_utc, sha256_hex
 
 

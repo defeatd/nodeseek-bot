@@ -190,22 +190,20 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     data = query.data or ""
 
-    m = re.match(r"^(noise|block_title):(?P<post_id>\d+)$", data)
+    m = re.match(r"^block_title:(?P<post_id>\d+)$", data)
     if m:
         post_id = int(m.group("post_id"))
-        action = m.group(1)
+        action = "block_title"
     else:
         m2 = re.match(r"^label:(useful|useless):(?P<post_id>\d+)$", data)
         if not m2:
+            if data == "noop":
+                await query.answer("已生效", show_alert=False)
+                return
             await query.answer("未知操作", show_alert=True)
             return
         post_id = int(m2.group("post_id"))
         action = f"label_{m2.group(1)}"
-
-    if action == "noise":
-        await ctx.mark_noise(post_id)
-        await query.answer("已标记为噪音")
-        return
 
     if action == "block_title":
         post = await ctx.storage.get_post(post_id)
@@ -222,6 +220,21 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         save_overrides(ctx.config.rules_overrides_path, ovr)
         await ctx.reload_rules()
         await query.answer("已加入标题黑名单")
+
+        # Update button to reflect immediate effect.
+        try:
+            msg = query.message
+            if msg is not None and msg.reply_markup is not None:
+                kb = msg.reply_markup.inline_keyboard
+                for row in kb:
+                    for btn in row:
+                        if btn.callback_data == f"block_title:{post_id}":
+                            btn.text = "已加入黑名单✅"
+                            btn.callback_data = "noop"
+                await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(kb))
+        except Exception:
+            logger.exception("failed to update block_title button")
+
         return
 
     if action in {"label_useful", "label_useless"}:
@@ -252,10 +265,7 @@ def build_inline_keyboard(post_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("有用", callback_data=f"label:useful:{post_id}"),
                 InlineKeyboardButton("没用", callback_data=f"label:useless:{post_id}"),
             ],
-            [
-                InlineKeyboardButton("标记噪音", callback_data=f"noise:{post_id}"),
-                InlineKeyboardButton("加入黑名单(标题)", callback_data=f"block_title:{post_id}"),
-            ],
+            [InlineKeyboardButton("加入黑名单(标题)", callback_data=f"block_title:{post_id}")],
         ]
     )
 

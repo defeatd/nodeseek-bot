@@ -57,13 +57,6 @@ class AppContext:
         await self.storage.reset_post(post_id)
         return True
 
-    async def mark_noise(self, post_id: int) -> None:
-        post = await self.storage.get_post(post_id)
-        if post is None:
-            return
-        await self.storage.set_status(post_id, STATUS_IGNORED)
-        await self.storage.update_fingerprint_processed(post.url_hash, "IGNORED")
-
     async def save_label(self, post_id: int, label: str) -> None:
         await self.storage.upsert_label(post_id, label, labeled_by=self.config.admin_user_id)
 
