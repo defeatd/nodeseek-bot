@@ -20,6 +20,10 @@ from nodeseek_bot.storage.types import (
 from nodeseek_bot.utils import canonicalize_url, now_utc, sha256_hex
 
 
+_LABEL_USEFUL = "useful"
+_LABEL_USELESS = "useless"
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -370,6 +374,52 @@ class Storage:
                 (now, decision, url_hash),
             )
             await conn.commit()
+
+    async def upsert_label(self, post_id: int, label: str, labeled_by: int | None = None) -> None:
+        label = (label or "").strip().lower()
+        if label not in {_LABEL_USEFUL, _LABEL_USELESS}:
+            raise ValueError(f"invalid label: {label}")
+
+        async with self._lock:
+            conn = self._conn()
+            now = now_utc().isoformat()
+            await conn.execute(
+                "INSERT INTO labels(post_id, label, labeled_by, labeled_at) VALUES(?, ?, ?, ?) "
+                "ON CONFLICT(post_id) DO UPDATE SET label=excluded.label, labeled_by=excluded.labeled_by, labeled_at=excluded.labeled_at",
+                (post_id, label, labeled_by, now),
+            )
+            await conn.commit()
+
+    async def count_labels(self) -> int:
+        async with self._lock:
+            conn = self._conn()
+            cursor = await conn.execute("SELECT COUNT(1) AS n FROM labels")
+            row = await cursor.fetchone()
+            return int(row["n"] if row is not None else 0)
+
+    async def get_labeled_scores(self, limit: int | None = None) -> list[tuple[float, int]]:
+        """Return list of (score_total, y) where y=1 for useful else 0."""
+        async with self._lock:
+            conn = self._conn()
+            sql = (
+                "SELECT s.score_total AS score_total, l.label AS label "
+                "FROM labels l JOIN scores s ON s.post_id=l.post_id "
+                "ORDER BY l.labeled_at ASC"
+            )
+            args: tuple = ()
+            if limit is not None:
+                sql += " LIMIT ?"
+                args = (int(limit),)
+            cursor = await conn.execute(sql, args)
+            rows = await cursor.fetchall()
+
+        out: list[tuple[float, int]] = []
+        for r in rows or []:
+            sc = float(r["score_total"])
+            lab = str(r["label"] or "").strip().lower()
+            y = 1 if lab == _LABEL_USEFUL else 0
+            out.append((sc, y))
+        return out
 
     async def reset_post(self, post_id: int) -> None:
         """Reset a post for reprocessing.

@@ -26,6 +26,9 @@ from nodeseek_bot.telegram.render import render_message
 from nodeseek_bot.utils import collapse_ws
 
 
+_MIN_LABELS_TO_AUTOFILTER = 10000
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,6 +63,9 @@ class AppContext:
             return
         await self.storage.set_status(post_id, STATUS_IGNORED)
         await self.storage.update_fingerprint_processed(post.url_hash, "IGNORED")
+
+    async def save_label(self, post_id: int, label: str) -> None:
+        await self.storage.upsert_label(post_id, label, labeled_by=self.config.admin_user_id)
 
 
 async def build_app_context(config: Config, application: Application) -> AppContext:
@@ -255,6 +261,73 @@ def _update_fetch_stats_and_metrics(ctx: AppContext, attempts: list) -> None:
             (ctx.metrics.fetch_browser_success_total if ok else ctx.metrics.fetch_browser_fail_total).inc()
 
 
+async def _compute_best_threshold(labeled: list[tuple[float, int]]) -> float:
+    if not labeled:
+        return float("inf")
+
+    # Sort descending by score
+    labeled_sorted = sorted(labeled, key=lambda x: float(x[0]), reverse=True)
+    total_pos = sum(1 for _, y in labeled_sorted if int(y) == 1)
+    total = len(labeled_sorted)
+
+    # If no useful labels, prefer predicting none.
+    if total_pos <= 0:
+        return float("inf")
+
+    # If all useful, predict all.
+    if total_pos >= total:
+        return float(labeled_sorted[-1][0])
+
+    best_f1 = -1.0
+    best_threshold = float(labeled_sorted[0][0])
+
+    tp = 0
+    fp = 0
+
+    idx = 0
+    while idx < total:
+        score_val = float(labeled_sorted[idx][0])
+
+        # Include all items with this score
+        while idx < total and float(labeled_sorted[idx][0]) == score_val:
+            y = int(labeled_sorted[idx][1])
+            if y == 1:
+                tp += 1
+            else:
+                fp += 1
+            idx += 1
+
+        fn = total_pos - tp
+        denom = (2 * tp + fp + fn)
+        f1 = (2 * tp / denom) if denom > 0 else 0.0
+
+        if f1 > best_f1:
+            best_f1 = f1
+            best_threshold = score_val
+
+    return best_threshold
+
+
+async def _should_deliver(ctx: AppContext, score_total: float, decision: str) -> bool:
+    if decision == "BLACKLIST":
+        return False
+
+    n_labels = await ctx.storage.count_labels()
+    if n_labels < _MIN_LABELS_TO_AUTOFILTER:
+        return True
+
+    labeled_scores = await ctx.storage.get_labeled_scores(limit=_MIN_LABELS_TO_AUTOFILTER)
+    threshold = await _compute_best_threshold(labeled_scores)
+
+    if threshold == float("inf"):
+        return False
+
+    if decision == "WHITELIST":
+        return True
+
+    return float(score_total) >= float(threshold)
+
+
 async def process_one(application: Application, ctx: AppContext) -> None:
     if ctx.paused:
         return
@@ -346,15 +419,16 @@ async def process_one(application: Application, ctx: AppContext) -> None:
     await ctx.storage.save_score(post_id, score)
 
     # Decide delivery
-    if score.decision in {"PUSH", "WHITELIST"}:
+    deliver = await _should_deliver(ctx, score.score_total, score.decision)
+    if deliver:
         if not await ctx.storage.has_delivery(post_id, ctx.config.target_chat_id):
             msg = render_message(post, summary, score)
-            keyboard = build_inline_keyboard(post_id, post.url)
+            keyboard = build_inline_keyboard(post_id)
             sent = await application.bot.send_message(
                 chat_id=ctx.config.target_chat_id,
                 text=msg,
                 parse_mode=ctx.config.tg_parse_mode,
-                disable_web_page_preview=False,
+                disable_web_page_preview=True,
                 reply_markup=keyboard,
             )
             await ctx.storage.record_delivery(post_id, ctx.config.target_chat_id, sent.message_id)

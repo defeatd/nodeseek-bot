@@ -83,6 +83,19 @@ CREATE TABLE IF NOT EXISTS deliveries (
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_deliveries_post_target ON deliveries(post_id, target_chat_id);
 
+CREATE TABLE IF NOT EXISTS labels (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id INTEGER NOT NULL,
+  label TEXT NOT NULL,
+  labeled_by INTEGER,
+  labeled_at TEXT NOT NULL,
+  FOREIGN KEY(post_id) REFERENCES posts(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_labels_post_id ON labels(post_id);
+CREATE INDEX IF NOT EXISTS ix_labels_labeled_at ON labels(labeled_at);
+CREATE INDEX IF NOT EXISTS ix_labels_label ON labels(label);
+
 CREATE TABLE IF NOT EXISTS fingerprints (
   url_hash TEXT PRIMARY KEY,
   last_seen_at TEXT NOT NULL,

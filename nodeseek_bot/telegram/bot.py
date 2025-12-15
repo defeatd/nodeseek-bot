@@ -191,12 +191,16 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     data = query.data or ""
 
     m = re.match(r"^(noise|block_title):(?P<post_id>\d+)$", data)
-    if not m:
-        await query.answer("未知操作", show_alert=True)
-        return
-
-    post_id = int(m.group("post_id"))
-    action = m.group(1)
+    if m:
+        post_id = int(m.group("post_id"))
+        action = m.group(1)
+    else:
+        m2 = re.match(r"^label:(useful|useless):(?P<post_id>\d+)$", data)
+        if not m2:
+            await query.answer("未知操作", show_alert=True)
+            return
+        post_id = int(m2.group("post_id"))
+        action = f"label_{m2.group(1)}"
 
     if action == "noise":
         await ctx.mark_noise(post_id)
@@ -220,11 +224,34 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await query.answer("已加入标题黑名单")
         return
 
+    if action in {"label_useful", "label_useless"}:
+        label = "useful" if action == "label_useful" else "useless"
+        await ctx.save_label(post_id, label)
+        await query.answer("已记录", show_alert=False)
 
-def build_inline_keyboard(post_id: int, url: str) -> InlineKeyboardMarkup:
+        # Optional: update button text to show current label.
+        try:
+            msg = query.message
+            if msg is not None and msg.reply_markup is not None:
+                kb = msg.reply_markup.inline_keyboard
+                if kb and kb[0] and len(kb[0]) >= 2:
+                    kb0 = kb[0]
+                    kb0[0].text = "有用✅" if label == "useful" else "有用"
+                    kb0[1].text = "没用✅" if label == "useless" else "没用"
+                    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(kb))
+        except Exception:
+            logger.exception("failed to update label buttons")
+
+        return
+
+
+def build_inline_keyboard(post_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("打开原帖", url=url)],
+            [
+                InlineKeyboardButton("有用", callback_data=f"label:useful:{post_id}"),
+                InlineKeyboardButton("没用", callback_data=f"label:useless:{post_id}"),
+            ],
             [
                 InlineKeyboardButton("标记噪音", callback_data=f"noise:{post_id}"),
                 InlineKeyboardButton("加入黑名单(标题)", callback_data=f"block_title:{post_id}"),
