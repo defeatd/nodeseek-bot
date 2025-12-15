@@ -41,10 +41,12 @@ class FetchAttempt:
 @dataclass(frozen=True)
 class ContentResult:
     content_text: str | None
+    content_html: str | None
     content_hash: str | None
     content_len: int
     fetched_at: datetime | None
     source_confidence: str
+    image_urls: list[str]
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,7 @@ class SummaryResult:
     summary_text: str
     key_points: list[str]
     actions: list[str]
+    image_summaries: list[str]
     token_in: int | None
     token_out: int | None
 

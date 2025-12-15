@@ -33,5 +33,10 @@ def render_message(post: PostRow, summary: SummaryResult | None, score: ScoreRes
         for p in summary.key_points[:6]:
             lines.append(f"- {_escape_text(p)}")
 
+    if summary is not None and summary.image_summaries:
+        lines.append("<b>图片识别</b>")
+        for p in summary.image_summaries[:10]:
+            lines.append(f"- {_escape_text(p)}")
+
     text = "\n".join(lines)
     return truncate(text, max_chars)

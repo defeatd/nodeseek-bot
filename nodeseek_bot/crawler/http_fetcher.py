@@ -14,7 +14,12 @@ from nodeseek_bot.crawler.errors import (
     ERROR_TIMEOUT,
     ERROR_UNKNOWN,
 )
-from nodeseek_bot.crawler.parser import detect_antibot, detect_login_required, extract_main_text
+from nodeseek_bot.crawler.parser import (
+    detect_antibot,
+    detect_login_required,
+    extract_image_urls_from_html,
+    extract_main_text,
+)
 from nodeseek_bot.ratelimit import MinIntervalLimiter
 from nodeseek_bot.storage.db import CONF_FULLTEXT_HTTP, CONF_RSS_ONLY
 from nodeseek_bot.storage.types import ContentResult
@@ -100,6 +105,12 @@ class HttpPostFetcher:
 
         text = extract_main_text(html)
         text = collapse_ws(text)
+
+        # Keep raw HTML for richer Markdown-structure reconstruction.
+        content_html = html
+
+        image_urls = extract_image_urls_from_html(html, base_url=url)
+
         content_hash = sha256_hex(text) if text else None
         content_len = len(text)
         fetched_at = now_utc()
@@ -109,9 +120,11 @@ class HttpPostFetcher:
 
         result = ContentResult(
             content_text=text,
+            content_html=content_html,
             content_hash=content_hash,
             content_len=content_len,
             fetched_at=fetched_at,
             source_confidence=CONF_FULLTEXT_HTTP,
+            image_urls=image_urls,
         )
         return result, method_meta

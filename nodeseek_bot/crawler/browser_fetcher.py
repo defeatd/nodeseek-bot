@@ -4,7 +4,12 @@ import logging
 import time
 
 from nodeseek_bot.crawler.errors import FetchError, ERROR_ANTIBOT, ERROR_LOGIN_REQUIRED, ERROR_TIMEOUT, ERROR_UNKNOWN
-from nodeseek_bot.crawler.parser import detect_antibot, detect_login_required, extract_main_text
+from nodeseek_bot.crawler.parser import (
+    detect_antibot,
+    detect_login_required,
+    extract_image_urls_from_html,
+    extract_main_text,
+)
 from nodeseek_bot.ratelimit import MinIntervalLimiter
 from nodeseek_bot.storage.db import CONF_FULLTEXT_BROWSER
 from nodeseek_bot.storage.types import ContentResult
@@ -78,12 +83,16 @@ class PlaywrightPostFetcher:
             raise FetchError(ERROR_LOGIN_REQUIRED, "login required")
 
         text = collapse_ws(extract_main_text(html))
+        content_html = html
+        image_urls = extract_image_urls_from_html(html, base_url=url)
         result = ContentResult(
             content_text=text,
+            content_html=content_html,
             content_hash=sha256_hex(text) if text else None,
             content_len=len(text),
             fetched_at=now_utc(),
             source_confidence=CONF_FULLTEXT_BROWSER,
+            image_urls=image_urls,
         )
 
         method_meta["duration_ms"] = int((time.perf_counter() - started) * 1000)

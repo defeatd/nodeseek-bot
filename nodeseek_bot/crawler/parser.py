@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urljoin
 
 from selectolax.parser import HTMLParser
 
@@ -21,6 +22,93 @@ _ANTIBOT_HINTS = [
     "captcha",
     "challenge",
 ]
+
+
+_MD_IMAGE_RE = re.compile(
+    r"!\[[^\]]*\]\((?P<url>[^\)\s]+)(?:\s+\"[^\"]*\")?\)",
+    flags=re.IGNORECASE,
+)
+
+
+def extract_image_urls_from_markdown(markdown: str, base_url: str = "") -> list[str]:
+    urls: list[str] = []
+    if not markdown:
+        return urls
+
+    for m in _MD_IMAGE_RE.finditer(markdown):
+        u = (m.group("url") or "").strip()
+        if not u:
+            continue
+        if base_url:
+            u = urljoin(base_url, u)
+        urls.append(u)
+
+    # Also handle inline HTML <img> within markdown.
+    urls.extend(extract_image_urls_from_html(markdown, base_url=base_url))
+
+    # Dedup keep order
+    seen: set[str] = set()
+    out: list[str] = []
+    for u in urls:
+        if u in seen:
+            continue
+        seen.add(u)
+        out.append(u)
+    return out
+
+
+def _extract_urls_from_srcset(srcset: str, base_url: str) -> list[str]:
+    urls: list[str] = []
+    for part in (srcset or "").split(","):
+        item = part.strip()
+        if not item:
+            continue
+        # "url 2x" or "url 480w"
+        u = item.split()[0].strip()
+        if not u:
+            continue
+        if base_url:
+            u = urljoin(base_url, u)
+        urls.append(u)
+    return urls
+
+
+def extract_image_urls_from_html(html: str, base_url: str = "") -> list[str]:
+    if not html:
+        return []
+
+    tree = HTMLParser(html)
+
+    urls: list[str] = []
+    for img in tree.css("img"):
+        src = (img.attributes.get("src") or "").strip()
+        data_src = (img.attributes.get("data-src") or "").strip()
+        srcset = (img.attributes.get("srcset") or "").strip()
+
+        candidates: list[str] = []
+        if src:
+            candidates.append(src)
+        if data_src:
+            candidates.append(data_src)
+        if srcset:
+            candidates.extend(_extract_urls_from_srcset(srcset, base_url))
+
+        for u in candidates:
+            if not u:
+                continue
+            if base_url:
+                u = urljoin(base_url, u)
+            urls.append(u)
+
+    # Dedup keep order
+    seen: set[str] = set()
+    out: list[str] = []
+    for u in urls:
+        if u in seen:
+            continue
+        seen.add(u)
+        out.append(u)
+    return out
 
 
 def detect_antibot(html: str) -> bool:

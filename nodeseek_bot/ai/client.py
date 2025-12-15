@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 PROMPT_VERSION = "v2-short-zh-longtext"
+PROMPT_IMAGE_VERSION = "v1-image-zh"
 
 
 @dataclass(frozen=True)
@@ -61,14 +62,18 @@ def _normalize_result(model: str, payload: dict, token_in: int | None, token_out
     summary = str(payload.get("summary") or "").strip()
     key_points = payload.get("key_points") or payload.get("points") or []
     actions = payload.get("actions") or payload.get("todos") or []
+    image_summaries = payload.get("image_summaries") or payload.get("images") or []
 
     if isinstance(key_points, str):
         key_points = [x.strip() for x in key_points.split("\n") if x.strip()]
     if isinstance(actions, str):
         actions = [x.strip() for x in actions.split("\n") if x.strip()]
+    if isinstance(image_summaries, str):
+        image_summaries = [x.strip() for x in image_summaries.split("\n") if x.strip()]
 
     key_points = [str(x).strip() for x in key_points if str(x).strip()]
     actions = [str(x).strip() for x in actions if str(x).strip()]
+    image_summaries = [str(x).strip() for x in image_summaries if str(x).strip()]
 
     return SummaryResult(
         model=model,
@@ -76,6 +81,7 @@ def _normalize_result(model: str, payload: dict, token_in: int | None, token_out
         summary_text=summary,
         key_points=key_points[:6],
         actions=actions[:4],
+        image_summaries=image_summaries[:10],
         token_in=token_in,
         token_out=token_out,
     )
@@ -128,6 +134,7 @@ class OpenAICompatClient:
                 "summary": truncate(text, 220),
                 "key_points": [],
                 "actions": [],
+                "image_summaries": [],
             }
             return _normalize_result(model="", payload=payload, token_in=None, token_out=None)
 
@@ -147,6 +154,63 @@ class OpenAICompatClient:
 
         user = f"标题：{title}\n链接：{url}\n内容：\n{text}"
         return await self._summarize_once(system, user)
+
+    async def summarize_images(self, title: str, url: str, image_data_urls: list[str]) -> list[str]:
+        """Summarize images (data URLs) and return bullet-like lines.
+
+        Uses chat-completions multi-part message content (text + image_url).
+        """
+        if not self._cfg.base_url or not self._cfg.api_key or not self._cfg.model:
+            return []
+
+        images = [x.strip() for x in (image_data_urls or []) if (x or "").strip()]
+        if not images:
+            return []
+
+        system = (
+            "你是一个中文图片内容识别与总结助手。\n"
+            "你会收到一组图片（base64 data URL）。请识别图片内容并输出严格的 JSON 对象，不要输出任何额外文本。\n"
+            "JSON 字段：\n"
+            "- image_summaries: 最多 10 条要点，每条描述一张或一类图片的关键信息（尽量短、保留数字/型号/价格/步骤/结论）。\n"
+        )
+
+        content_parts: list[dict] = [
+            {
+                "type": "text",
+                "text": f"标题：{title}\n链接：{url}\n请总结以下图片内容：",
+            }
+        ]
+        for img in images[:10]:
+            content_parts.append({"type": "image_url", "image_url": {"url": img}})
+
+        payload = {
+            "model": self._cfg.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": content_parts},
+            ],
+            "temperature": 0.2,
+            "max_tokens": 700,
+        }
+
+        try:
+            payload_with_format = dict(payload)
+            payload_with_format["response_format"] = {"type": "json_object"}
+            data = await self._post("/v1/chat/completions", payload_with_format)
+        except httpx.HTTPStatusError:
+            data = await self._post("/v1/chat/completions", payload)
+
+        content = (
+            (((data.get("choices") or [{}])[0]).get("message") or {}).get("content")
+            or (((data.get("choices") or [{}])[0]).get("delta") or {}).get("content")
+            or ""
+        )
+
+        payload_obj = _extract_json(content) or {"image_summaries": []}
+        items = payload_obj.get("image_summaries") or payload_obj.get("images") or []
+        if isinstance(items, str):
+            items = [x.strip() for x in items.split("\n") if x.strip()]
+        return [str(x).strip() for x in (items or []) if str(x).strip()][:10]
 
     async def _summarize_once(self, system: str, user: str) -> SummaryResult:
         if self._cfg.prefer_chat_completions:
@@ -238,7 +302,12 @@ class OpenAICompatClient:
             token_in = usage.get("prompt_tokens")
             token_out = usage.get("completion_tokens")
 
-        payload_obj = _extract_json(content) or {"summary": content.strip(), "key_points": [], "actions": []}
+        payload_obj = _extract_json(content) or {
+            "summary": content.strip(),
+            "key_points": [],
+            "actions": [],
+            "image_summaries": [],
+        }
         return _normalize_result(self._cfg.model, payload_obj, token_in, token_out)
 
     async def _summarize_responses(self, system: str, user: str) -> SummaryResult:
@@ -276,5 +345,10 @@ class OpenAICompatClient:
             token_in = usage.get("input_tokens") or usage.get("prompt_tokens")
             token_out = usage.get("output_tokens") or usage.get("completion_tokens")
 
-        payload_obj = _extract_json(content) or {"summary": content.strip(), "key_points": [], "actions": []}
+        payload_obj = _extract_json(content) or {
+            "summary": content.strip(),
+            "key_points": [],
+            "actions": [],
+            "image_summaries": [],
+        }
         return _normalize_result(self._cfg.model, payload_obj, token_in, token_out)

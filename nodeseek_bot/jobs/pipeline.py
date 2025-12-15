@@ -14,16 +14,20 @@ from nodeseek_bot.crawler.errors import ERROR_LOGIN_REQUIRED
 from nodeseek_bot.crawler.browser_fetcher import PlaywrightPostFetcher
 from nodeseek_bot.crawler.http_fetcher import HttpPostFetcher
 from nodeseek_bot.crawler.service import CrawlerService
+from nodeseek_bot.media.images import download_images_as_data_urls
 from nodeseek_bot.metrics.metrics import Metrics, RuntimeStats, write_status_json
 from nodeseek_bot.ratelimit import MinIntervalLimiter
 from nodeseek_bot.rss.async_poller import AsyncRssPoller
 from nodeseek_bot.rules.engine import RuleEngine
 from nodeseek_bot.rules.loader import load_rules
 from nodeseek_bot.storage.db import Storage, STATUS_FAILED, STATUS_IGNORED
+from nodeseek_bot.storage.types import SummaryResult
 from nodeseek_bot.telegram.alerts import maybe_send_consecutive_failure_alert
 from nodeseek_bot.telegram.bot import build_inline_keyboard
 from nodeseek_bot.telegram.render import render_message
 from nodeseek_bot.utils import collapse_ws
+from nodeseek_bot.crawler.parser import extract_image_urls_from_markdown
+from nodeseek_bot.markdown.html_rich import RichTextConfig, html_to_rich_text
 
 
 _MIN_LABELS_TO_AUTOFILTER = 10000
@@ -338,8 +342,10 @@ async def process_one(application: Application, ctx: AppContext) -> None:
     rss_text = collapse_ws((post.rss_summary or "") + "\n" + post.title)
 
     content_text = rss_text
+    content_html: str | None = None
     source_conf = "RSS_ONLY"
     attempts = []
+    image_urls: list[str] = []
 
     tried_fulltext = False
     if _should_attempt_fulltext(ctx, post.title, rss_text):
@@ -349,6 +355,8 @@ async def process_one(application: Application, ctx: AppContext) -> None:
             await ctx.storage.save_content(post_id, content_result)
             source_conf = content_result.source_confidence
             content_text = content_result.content_text or rss_text
+            content_html = content_result.content_html
+            image_urls = list(content_result.image_urls or [])
         except Exception as e:
             await ctx.storage.set_status(post_id, STATUS_FAILED)
             ctx.runtime_stats.consecutive_fetch_failures += 1
@@ -362,7 +370,9 @@ async def process_one(application: Application, ctx: AppContext) -> None:
             )
             logger.warning("fulltext fetch failed post_id=%s err=%s", post_id, e)
             content_text = rss_text
+            content_html = None
             source_conf = "RSS_ONLY"
+            image_urls = []
 
     # Update fetch/login stats and metrics
     if tried_fulltext:
@@ -384,8 +394,66 @@ async def process_one(application: Application, ctx: AppContext) -> None:
     if summary is None:
         ctx.metrics.ai_calls_total.inc()
         try:
+            rich_text = ""
+            if content_html and ctx.config.rich_text_enabled:
+                rich_text = html_to_rich_text(
+                    content_html,
+                    base_url=post.url,
+                    cfg=RichTextConfig(
+                        enabled=True,
+                        max_chars=ctx.config.rich_text_max_chars,
+                        max_code_blocks=ctx.config.rich_text_max_code_blocks,
+                        max_code_chars_total=ctx.config.rich_text_max_code_chars_total,
+                        max_table_rows=ctx.config.rich_text_max_table_rows,
+                        max_links=ctx.config.rich_text_max_links,
+                    ),
+                )
+
+            ai_input_text = rich_text or content_text
+
             with ctx.metrics.ai_latency_seconds.time():
-                summary = await ctx.ai.summarize(post.title, post.url, content_text)
+                summary = await ctx.ai.summarize(post.title, post.url, ai_input_text)
+
+            # Image summaries (vision)
+            if ctx.config.image_summary_enabled:
+                try:
+                    if not image_urls:
+                        # RSS summary may contain HTML/Markdown with images
+                        image_urls = extract_image_urls_from_markdown(post.rss_summary or "", base_url=post.url)
+
+                    if image_urls:
+                        suffixes = [
+                            s.strip()
+                            for s in (ctx.config.image_cookie_host_suffixes or "").split(",")
+                            if s.strip()
+                        ]
+                        images = await download_images_as_data_urls(
+                            image_urls,
+                            cookie_header=ctx.config.nodeseek_cookie,
+                            user_agent=ctx.config.user_agent,
+                            timeout_seconds=ctx.config.image_download_timeout_seconds,
+                            max_count=ctx.config.image_max_count,
+                            max_bytes_per_image=ctx.config.image_max_bytes,
+                            max_total_bytes=ctx.config.image_total_max_bytes,
+                            concurrency=ctx.config.image_concurrency,
+                            cookie_host_suffixes=suffixes,
+                        )
+                        data_urls = [x.data_url for x in images]
+                        if data_urls:
+                            img_summaries = await ctx.ai.summarize_images(post.title, post.url, data_urls)
+                            summary = SummaryResult(
+                                model=summary.model,
+                                prompt_version=summary.prompt_version,
+                                summary_text=summary.summary_text,
+                                key_points=summary.key_points,
+                                actions=summary.actions,
+                                image_summaries=img_summaries,
+                                token_in=summary.token_in,
+                                token_out=summary.token_out,
+                            )
+                except Exception as e:
+                    logger.warning("image summarize failed post_id=%s err=%s", post_id, e)
+
             await ctx.storage.save_summary(post_id, summary)
             ctx.runtime_stats.consecutive_ai_failures = 0
             ctx.metrics.set_consecutive("ai", 0)
@@ -406,7 +474,8 @@ async def process_one(application: Application, ctx: AppContext) -> None:
     # Score (include AI-extracted text to improve recall)
     score_input = content_text
     if summary is not None:
-        score_input = score_input + "\n\n" + summary.summary_text + "\n" + "\n".join(summary.key_points + summary.actions)
+        extras = summary.key_points + summary.actions + (summary.image_summaries or [])
+        score_input = score_input + "\n\n" + summary.summary_text + "\n" + "\n".join(extras)
 
     score = ctx.rules.score(title=post.title, text=score_input, source_confidence=source_conf)
     await ctx.storage.save_score(post_id, score)

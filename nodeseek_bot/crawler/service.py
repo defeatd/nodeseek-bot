@@ -67,10 +67,12 @@ class CrawlerService:
         text = rss_fallback_text
         return ContentResult(
             content_text=text,
+            content_html=None,
             content_hash=sha256_hex(text) if text else None,
             content_len=len(text),
             fetched_at=now_utc(),
             source_confidence=CONF_RSS_ONLY,
+            image_urls=[],
         )
 
     async def fetch_best_effort(self, url: str, rss_fallback_text: str) -> tuple[ContentResult, list[FetchAttempt]]:

@@ -55,12 +55,33 @@ class Storage:
         self._db: aiosqlite.Connection | None = None
         self._lock = asyncio.Lock()
 
+    async def _ensure_columns(self) -> None:
+        """Best-effort migrations for existing DBs."""
+        conn = self._conn()
+
+        async def has_column(table: str, col: str) -> bool:
+            cur = await conn.execute(f"PRAGMA table_info({table})")
+            rows = await cur.fetchall()
+            return any(str(r[1]) == col for r in rows)
+
+        if not await has_column("contents", "image_urls_json"):
+            await conn.execute("ALTER TABLE contents ADD COLUMN image_urls_json TEXT")
+
+        if not await has_column("contents", "content_html"):
+            await conn.execute("ALTER TABLE contents ADD COLUMN content_html TEXT")
+
+        if not await has_column("ai_summaries", "image_summaries_json"):
+            await conn.execute("ALTER TABLE ai_summaries ADD COLUMN image_summaries_json TEXT")
+
+        await conn.commit()
+
     async def connect(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(self._path.as_posix())
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(SCHEMA_SQL)
         await self._db.commit()
+        await self._ensure_columns()
 
     async def close(self) -> None:
         if self._db is not None:
@@ -201,14 +222,17 @@ class Storage:
             conn = self._conn()
             now = now_utc().isoformat()
             await conn.execute(
-                "INSERT INTO contents(post_id, content_text, content_hash, content_len, fetched_at) VALUES(?, ?, ?, ?, ?) "
-                "ON CONFLICT(post_id) DO UPDATE SET content_text=excluded.content_text, content_hash=excluded.content_hash, content_len=excluded.content_len, fetched_at=excluded.fetched_at",
+                "INSERT INTO contents(post_id, content_text, content_html, content_hash, content_len, fetched_at, image_urls_json) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(post_id) DO UPDATE SET content_text=excluded.content_text, content_html=excluded.content_html, content_hash=excluded.content_hash, content_len=excluded.content_len, fetched_at=excluded.fetched_at, image_urls_json=excluded.image_urls_json",
                 (
                     post_id,
                     result.content_text,
+                    result.content_html,
                     result.content_hash,
                     result.content_len,
                     result.fetched_at.isoformat() if result.fetched_at else None,
+                    json.dumps(result.image_urls or [], ensure_ascii=False),
                 ),
             )
             await conn.execute(
@@ -221,7 +245,7 @@ class Storage:
         async with self._lock:
             conn = self._conn()
             cursor = await conn.execute(
-                "SELECT c.content_text, c.content_hash, c.content_len, c.fetched_at, p.source_confidence "
+                "SELECT c.content_text, c.content_html, c.content_hash, c.content_len, c.fetched_at, c.image_urls_json, p.source_confidence "
                 "FROM contents c JOIN posts p ON p.id=c.post_id WHERE c.post_id=?",
                 (post_id,),
             )
@@ -229,12 +253,17 @@ class Storage:
             if row is None:
                 return None
             fetched_at = datetime.fromisoformat(row["fetched_at"]) if row["fetched_at"] else None
+            row_dict = dict(row)
+            image_urls_raw = row_dict.get("image_urls_json")
+            image_urls = json.loads(image_urls_raw) if image_urls_raw else []
             return ContentResult(
                 content_text=row["content_text"],
+                content_html=row_dict.get("content_html"),
                 content_hash=row["content_hash"],
                 content_len=int(row["content_len"]),
                 fetched_at=fetched_at,
                 source_confidence=row["source_confidence"],
+                image_urls=image_urls,
             )
 
     async def add_fetch_attempt(self, post_id: int, attempt_no: int, attempt: FetchAttempt) -> None:
@@ -263,9 +292,9 @@ class Storage:
             conn = self._conn()
             now = now_utc().isoformat()
             await conn.execute(
-                "INSERT INTO ai_summaries(post_id, model, prompt_version, summary_text, key_points_json, actions_json, token_in, token_out, created_at) "
-                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(post_id) DO UPDATE SET model=excluded.model, prompt_version=excluded.prompt_version, summary_text=excluded.summary_text, key_points_json=excluded.key_points_json, actions_json=excluded.actions_json, token_in=excluded.token_in, token_out=excluded.token_out, created_at=excluded.created_at",
+                "INSERT INTO ai_summaries(post_id, model, prompt_version, summary_text, key_points_json, actions_json, image_summaries_json, token_in, token_out, created_at) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(post_id) DO UPDATE SET model=excluded.model, prompt_version=excluded.prompt_version, summary_text=excluded.summary_text, key_points_json=excluded.key_points_json, actions_json=excluded.actions_json, image_summaries_json=excluded.image_summaries_json, token_in=excluded.token_in, token_out=excluded.token_out, created_at=excluded.created_at",
                 (
                     post_id,
                     summary.model,
@@ -273,6 +302,7 @@ class Storage:
                     summary.summary_text,
                     json.dumps(summary.key_points, ensure_ascii=False),
                     json.dumps(summary.actions, ensure_ascii=False),
+                    json.dumps(summary.image_summaries or [], ensure_ascii=False),
                     summary.token_in,
                     summary.token_out,
                     now,
@@ -294,14 +324,18 @@ class Storage:
             row = await cursor.fetchone()
             if row is None:
                 return None
-            key_points = json.loads(row["key_points_json"]) if row["key_points_json"] else []
-            actions = json.loads(row["actions_json"]) if row["actions_json"] else []
+            row_dict = dict(row)
+            key_points = json.loads(row_dict.get("key_points_json") or "[]")
+            actions = json.loads(row_dict.get("actions_json") or "[]")
+            image_summaries_raw = row_dict.get("image_summaries_json")
+            image_summaries = json.loads(image_summaries_raw) if image_summaries_raw else []
             return SummaryResult(
                 model=row["model"],
                 prompt_version=row["prompt_version"],
                 summary_text=row["summary_text"],
                 key_points=key_points,
                 actions=actions,
+                image_summaries=image_summaries,
                 token_in=row["token_in"],
                 token_out=row["token_out"],
             )

@@ -40,6 +40,15 @@ class Config:
     alert_chat_id: int
     tg_parse_mode: str
 
+    # Image summary
+    image_summary_enabled: bool
+    image_max_count: int
+    image_max_bytes: int
+    image_total_max_bytes: int
+    image_download_timeout_seconds: int
+    image_concurrency: int
+    image_cookie_host_suffixes: str
+
     # RSS
     rss_url: str
     rss_interval_seconds: int
@@ -62,6 +71,14 @@ class Config:
     allow_browser_fallback: bool
     playwright_headless: bool
     playwright_nav_timeout_seconds: int
+
+    # Rich text extraction (reconstruct Markdown-like structure from HTML)
+    rich_text_enabled: bool
+    rich_text_max_chars: int
+    rich_text_max_code_blocks: int
+    rich_text_max_code_chars_total: int
+    rich_text_max_table_rows: int
+    rich_text_max_links: int
 
     # AI
     ai_base_url: str
@@ -107,6 +124,13 @@ def load_config() -> Config:
         admin_user_id=_env_int("ADMIN_USER_ID", 1443986987),
         alert_chat_id=_env_int("ALERT_CHAT_ID", 1443986987),
         tg_parse_mode=_env_str("TG_PARSE_MODE", "HTML"),
+        image_summary_enabled=_env_bool("IMAGE_SUMMARY_ENABLED", True),
+        image_max_count=_env_int("IMAGE_MAX_COUNT", 10),
+        image_max_bytes=_env_int("IMAGE_MAX_BYTES", 1500000),
+        image_total_max_bytes=_env_int("IMAGE_TOTAL_MAX_BYTES", 8000000),
+        image_download_timeout_seconds=_env_int("IMAGE_DOWNLOAD_TIMEOUT_SECONDS", 20),
+        image_concurrency=_env_int("IMAGE_CONCURRENCY", 3),
+        image_cookie_host_suffixes=_env_str("IMAGE_COOKIE_HOST_SUFFIXES", "nodeseek.com"),
         rss_url=_env_str("RSS_URL", "https://rss.nodeseek.com/"),
         rss_interval_seconds=_env_int("RSS_INTERVAL_SECONDS", 60),
         rss_jitter_seconds=_env_int("RSS_JITTER_SECONDS", 10),
@@ -127,6 +151,12 @@ def load_config() -> Config:
         allow_browser_fallback=_env_bool("ALLOW_BROWSER_FALLBACK", True),
         playwright_headless=_env_bool("PLAYWRIGHT_HEADLESS", True),
         playwright_nav_timeout_seconds=_env_int("PLAYWRIGHT_NAV_TIMEOUT_SECONDS", 45),
+        rich_text_enabled=_env_bool("RICH_TEXT_ENABLED", True),
+        rich_text_max_chars=_env_int("RICH_TEXT_MAX_CHARS", 20000),
+        rich_text_max_code_blocks=_env_int("RICH_TEXT_MAX_CODE_BLOCKS", 6),
+        rich_text_max_code_chars_total=_env_int("RICH_TEXT_MAX_CODE_CHARS_TOTAL", 6000),
+        rich_text_max_table_rows=_env_int("RICH_TEXT_MAX_TABLE_ROWS", 30),
+        rich_text_max_links=_env_int("RICH_TEXT_MAX_LINKS", 40),
         ai_base_url=_env_str("AI_BASE_URL", ""),
         ai_api_key=_env_str("AI_API_KEY", ""),
         ai_model=_env_str("AI_MODEL", ""),

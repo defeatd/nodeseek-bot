@@ -26,9 +26,11 @@ CREATE INDEX IF NOT EXISTS ix_posts_status_updated_at ON posts(status, updated_a
 CREATE TABLE IF NOT EXISTS contents (
   post_id INTEGER PRIMARY KEY,
   content_text TEXT,
+  content_html TEXT,
   content_hash TEXT,
   content_len INTEGER NOT NULL,
   fetched_at TEXT,
+  image_urls_json TEXT,
   FOREIGN KEY(post_id) REFERENCES posts(id) ON DELETE CASCADE
 );
 
@@ -57,6 +59,7 @@ CREATE TABLE IF NOT EXISTS ai_summaries (
   summary_text TEXT NOT NULL,
   key_points_json TEXT,
   actions_json TEXT,
+  image_summaries_json TEXT,
   token_in INTEGER,
   token_out INTEGER,
   created_at TEXT NOT NULL,

@@ -9,6 +9,8 @@
 ```bash
 cp .env.example .env
 # 编辑 .env，至少填写 BOT_TOKEN / TARGET_CHAT_ID / ADMIN_USER_ID / AI_BASE_URL / AI_API_KEY / AI_MODEL
+# 图片识别总结（可选）：IMAGE_SUMMARY_ENABLED=true（默认开启），并按需调整 IMAGE_MAX_COUNT/IMAGE_MAX_BYTES 等
+# Markdown 富结构（可选，默认开启）：抓全文后会把正文 HTML 转为 Markdown-like 结构（标题/列表/代码块/表格/引用/链接/图片）再交给 AI，总结更准确；可用 RICH_TEXT_ENABLED=false 关闭
 ```
 
 2) 构建并启动
