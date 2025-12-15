@@ -178,6 +178,24 @@ async def cmd_reprocess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text("已重置并加入队列" if ok else "post_id 不存在")
 
 
+async def _build_keyboard_for_post(post_id: int, *, label: str | None = None, block_title_done: bool = False) -> InlineKeyboardMarkup:
+    useful_text = "有用✅" if label == "useful" else "有用"
+    useless_text = "没用✅" if label == "useless" else "没用"
+
+    block_text = "已加入黑名单✅" if block_title_done else "加入黑名单(标题)"
+    block_cb = "noop" if block_title_done else f"block_title:{post_id}"
+
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(useful_text, callback_data=f"label:useful:{post_id}"),
+                InlineKeyboardButton(useless_text, callback_data=f"label:useless:{post_id}"),
+            ],
+            [InlineKeyboardButton(block_text, callback_data=block_cb)],
+        ]
+    )
+
+
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if query is None:
@@ -221,17 +239,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await ctx.reload_rules()
         await query.answer("已加入标题黑名单")
 
-        # Update button to reflect immediate effect.
+        # Update button to reflect immediate effect (InlineKeyboardButton is immutable).
         try:
-            msg = query.message
-            if msg is not None and msg.reply_markup is not None:
-                kb = msg.reply_markup.inline_keyboard
-                for row in kb:
-                    for btn in row:
-                        if btn.callback_data == f"block_title:{post_id}":
-                            btn.text = "已加入黑名单✅"
-                            btn.callback_data = "noop"
-                await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(kb))
+            await query.edit_message_reply_markup(
+                reply_markup=await _build_keyboard_for_post(post_id, label=None, block_title_done=True)
+            )
         except Exception:
             logger.exception("failed to update block_title button")
 
@@ -239,19 +251,31 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if action in {"label_useful", "label_useless"}:
         label = "useful" if action == "label_useful" else "useless"
-        await ctx.save_label(post_id, label)
+
+        post = await ctx.storage.get_post(post_id)
+        if post is None:
+            await query.answer("帖子已过期/不存在", show_alert=True)
+            try:
+                # Disable old buttons to avoid repeated failures.
+                await query.edit_message_reply_markup(
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("已过期", callback_data="noop")]])
+                )
+            except Exception:
+                logger.exception("failed to disable expired keyboard")
+            return
+
+        try:
+            await ctx.save_label(post_id, label)
+        except Exception as e:
+            logger.warning("save_label failed post_id=%s err=%s", post_id, e)
+            await query.answer("记录失败：帖子不存在或 DB 已更新", show_alert=True)
+            return
+
         await query.answer("已记录", show_alert=False)
 
-        # Optional: update button text to show current label.
+        # Update buttons by rebuilding keyboard.
         try:
-            msg = query.message
-            if msg is not None and msg.reply_markup is not None:
-                kb = msg.reply_markup.inline_keyboard
-                if kb and kb[0] and len(kb[0]) >= 2:
-                    kb0 = kb[0]
-                    kb0[0].text = "有用✅" if label == "useful" else "有用"
-                    kb0[1].text = "没用✅" if label == "useless" else "没用"
-                    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(kb))
+            await query.edit_message_reply_markup(reply_markup=await _build_keyboard_for_post(post_id, label=label))
         except Exception:
             logger.exception("failed to update label buttons")
 
@@ -259,6 +283,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 def build_inline_keyboard(post_id: int) -> InlineKeyboardMarkup:
+    # keep it sync with _build_keyboard_for_post
     return InlineKeyboardMarkup(
         [
             [
@@ -270,7 +295,13 @@ def build_inline_keyboard(post_id: int) -> InlineKeyboardMarkup:
     )
 
 
+async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.exception("telegram handler error", exc_info=context.error)
+
+
 def register_handlers(app: Application) -> None:
+    app.add_error_handler(_on_error)
+
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("pause", cmd_pause))
     app.add_handler(CommandHandler("resume", cmd_resume))

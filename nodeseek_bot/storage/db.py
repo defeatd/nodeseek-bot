@@ -418,12 +418,17 @@ class Storage:
         async with self._lock:
             conn = self._conn()
             now = now_utc().isoformat()
-            await conn.execute(
-                "INSERT INTO labels(post_id, label, labeled_by, labeled_at) VALUES(?, ?, ?, ?) "
-                "ON CONFLICT(post_id) DO UPDATE SET label=excluded.label, labeled_by=excluded.labeled_by, labeled_at=excluded.labeled_at",
-                (post_id, label, labeled_by, now),
-            )
-            await conn.commit()
+            try:
+                await conn.execute(
+                    "INSERT INTO labels(post_id, label, labeled_by, labeled_at) VALUES(?, ?, ?, ?) "
+                    "ON CONFLICT(post_id) DO UPDATE SET label=excluded.label, labeled_by=excluded.labeled_by, labeled_at=excluded.labeled_at",
+                    (post_id, label, labeled_by, now),
+                )
+                await conn.commit()
+            except aiosqlite.IntegrityError as e:
+                # Likely FK failure because the post no longer exists (old TG message button).
+                logger.warning("upsert_label integrity error post_id=%s err=%s", post_id, e)
+                raise
 
     async def count_labels(self) -> int:
         async with self._lock:
